@@ -239,8 +239,13 @@ RTC_DS3231 rtc;
    3) DISPLAY OPTIONS
 ---------------------------------------------------------------------------- */
 #define BLANK_LEADING_HOUR_ZERO  true   // " 9:05" instead of "09:05"
-const uint8_t EEB3_SECOND   = 58;      // second :58 shows "EEb3" (periods only)
-const uint8_t PERIOD_SECOND = 59;      // second :59 shows period label (periods only)
+
+// EEb3 shows from second EEB3_START up to (not including) PERIOD_START  -> 4 seconds
+// Period label shows from PERIOD_START to :59                            -> 3 seconds
+// Total announcement window: 7 seconds per minute, only during active periods.
+// Each boundary is ONE relay transition - no extra clicking, safe for bulbs.
+const uint8_t EEB3_START   = 53;   // :53 :54 :55 :56  - "EEb3"
+const uint8_t PERIOD_START = 57;   // :57 :58 :59      - period label (e.g. "P  1")
 
 /* ----------------------------------------------------------------------------
    3b) OPERATING HOURS
@@ -502,19 +507,21 @@ void loop() {
     return;
   }
 
-  // EEb3/:59 only during active periods. Breaks/gaps/before P1/after P9
-  // show plain time the entire minute.
+  // EEb3 (:53-:56, 4 s) and period label (:57-:59, 3 s) are shown ONLY when
+  // a period is active. Breaks, gaps, before P1, after P9 -> plain time always.
   char frame[4];
   bool colonOn;
 
   const char* activePeriod = getActivePeriod(localMins);
   bool periodActive = (activePeriod != nullptr);
 
-  if (periodActive && ss == EEB3_SECOND) {
+  if (periodActive && ss >= EEB3_START && ss < PERIOD_START) {
+    // EEb3 for 4 seconds
     frame[0] = 'E'; frame[1] = 'E'; frame[2] = 'b'; frame[3] = '3';
     colonOn = false;
   }
-  else if (periodActive && ss == PERIOD_SECOND) {
+  else if (periodActive && ss >= PERIOD_START) {
+    // Period label for 3 seconds
     frame[0] = activePeriod[0]; frame[1] = activePeriod[1];
     frame[2] = activePeriod[2]; frame[3] = activePeriod[3];
     colonOn = false;
@@ -811,10 +818,12 @@ story += [section_box("5.  DISPLAY BEHAVIOUR"), SP(3*mm),
 
           Paragraph("Display logic during operating hours (08:00–17:00)", S_H1),
           Paragraph("EEb3 and the period label appear ONLY during an active period (P1–P9). "
-                    "During the break, between periods, before P1, and after P9 "
-                    "the clock shows plain time the entire minute with no flash.", S_BODL),
+                    "EEb3 shows for 4 seconds (:53–:56), period label for 3 seconds (:57–:59) — "
+                    "long enough to read comfortably. Only 3 relay transitions per minute. "
+                    "During breaks, between periods, before P1, and after P9 the clock "
+                    "shows plain time the entire minute.", S_BODL),
           make_table(
-            ["Condition", "Second :00–:57", "Second :58", "Second :59"],
+            ["Condition", "Seconds :00–:52", "Seconds :53–:56", "Seconds :57–:59"],
             [["During a period (P1–P9)", "HH:MM  colon ON", "EEb3  colon OFF", "P  x  colon OFF"],
              ["Break (10:55–11:15)",     "HH:MM  colon ON", "HH:MM  colon ON", "HH:MM  colon ON"],
              ["Between periods / gaps",  "HH:MM  colon ON", "HH:MM  colon ON", "HH:MM  colon ON"],
@@ -1022,10 +1031,10 @@ story += [section_box("11.  QUICK REFERENCE"), SP(3*mm),
               "Relay boards fire on HIGH instead of LOW (reverse polarity boards)"],
              ["BLANK_LEADING_HOUR_ZERO", "true",
               "You prefer 09:05 displayed instead of  9:05"],
-             ["EEB3_SECOND",             "58",
-              "Moving the EEb3 flash to a different second"],
-             ["PERIOD_SECOND",           "59",
-              "Moving the period label to a different second"],
+             ["EEB3_START",              "53",
+              "First second EEb3 appears (:53–:56, 4 seconds total)"],
+             ["PERIOD_START",            "57",
+              "First second period label appears (:57–:59, 3 seconds total)"],
              ["CLOCK_ON_MINS",           "8*60 = 480",
               "Time when relays wake up (08:00 by default)"],
              ["CLOCK_OFF_MINS",          "17*60 = 1020",

@@ -76,8 +76,13 @@ RTC_DS3231 rtc;
    3) DISPLAY OPTIONS
 ---------------------------------------------------------------------------- */
 #define BLANK_LEADING_HOUR_ZERO  true   // " 9:05" instead of "09:05"
-const uint8_t EEB3_SECOND   = 58;       // second :58 shows "EEb3" (periods only)
-const uint8_t PERIOD_SECOND = 59;       // second :59 shows period label (periods only)
+
+// EEb3 shows from second EEB3_START up to (not including) PERIOD_START  -> 4 seconds
+// Period label shows from PERIOD_START to :59                            -> 3 seconds
+// Total announcement window: 7 seconds per minute, only during active periods.
+// Each boundary is ONE relay transition — no extra clicking, safe for bulbs.
+const uint8_t EEB3_START   = 53;   // :53 :54 :55 :56  — "EEb3"
+const uint8_t PERIOD_START = 57;   // :57 :58 :59      — period label (e.g. "P  1")
 
 /* ----------------------------------------------------------------------------
    3b) OPERATING HOURS
@@ -368,28 +373,27 @@ void loop() {
   }
 
   // ── Decide what to show ─────────────────────────────────────────────────
-  // EEb3 at :58 and period label at :59 are shown ONLY when a period is
-  // currently active. During breaks, between periods, before P1 and after
-  // P9 (but within 08:00–17:00) the clock shows plain HH:MM the whole time.
+  // EEb3 (:53-:56, 4 s) and period label (:57-:59, 3 s) are shown ONLY when
+  // a period is active. Breaks, gaps, before P1, after P9 → plain time always.
   char frame[4];
   bool colonOn;
 
   const char* activePeriod = getActivePeriod(localMins);
   bool periodActive = (activePeriod != nullptr);
 
-  if (periodActive && ss == EEB3_SECOND) {
-    // School-period identifier flash at second :58
+  if (periodActive && ss >= EEB3_START && ss < PERIOD_START) {
+    // EEb3 for 4 seconds
     frame[0] = 'E'; frame[1] = 'E'; frame[2] = 'b'; frame[3] = '3';
     colonOn = false;
   }
-  else if (periodActive && ss == PERIOD_SECOND) {
-    // Period label at second :59
+  else if (periodActive && ss >= PERIOD_START) {
+    // Period label for 3 seconds
     frame[0] = activePeriod[0]; frame[1] = activePeriod[1];
     frame[2] = activePeriod[2]; frame[3] = activePeriod[3];
     colonOn = false;
   }
   else {
-    // All other seconds AND all non-period slots → show plain time
+    // All other seconds AND all non-period slots → plain time
     frame[0] = (BLANK_LEADING_HOUR_ZERO && hh < 10) ? ' ' : ('0' + hh / 10);
     frame[1] = '0' + hh % 10;
     frame[2] = '0' + mm / 10;
