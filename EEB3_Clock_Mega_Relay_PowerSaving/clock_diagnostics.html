@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EEB3 Clock — Virtual Clock &amp; Wiring Diagnostics</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --panel: rgba(20, 28, 47, 0.75);
+    --border: rgba(255,255,255,0.08);
+    --text: #f3f4f6;
+    --muted: #9ca3af;
+    --glow: #ff5722;
+    --glow-rgb: 255, 87, 34;
+    --accent: #00e5ff;
+    --accent-rgb: 0, 229, 255;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    background-image: radial-gradient(circle at 50% 0%, rgba(var(--accent-rgb),0.06) 0%, transparent 45%);
+  }
+  header { max-width: 1200px; margin: 0 auto 24px; text-align: center; }
+  h1 { font-size: 1.8rem; font-weight: 800; }
+  .subtitle { color: var(--accent); font-size: 0.85rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
+  .wrap { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 22px; }
+  @media (min-width: 980px) { .wrap { grid-template-columns: 5fr 7fr; } }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    backdrop-filter: blur(10px);
+  }
+  .panel-title {
+    font-size: 1rem; font-weight: 700; margin-bottom: 16px;
+    border-left: 3px solid var(--accent); padding-left: 10px;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+  }
+  /* CLOCK */
+  .chassis {
+    background: #110e0b; border: 10px solid #281e15; border-radius: 16px;
+    padding: 30px 18px; display: flex; justify-content: center; align-items: center; gap: 14px;
+    box-shadow: inset 0 0 30px rgba(0,0,0,0.8);
+  }
+  .digit { width: 70px; height: 120px; position: relative; }
+  .seg { position: absolute; background: #1e1b18; border-radius: 3px; transition: background-color .15s, box-shadow .15s; }
+  .seg.on { background: var(--glow); box-shadow: 0 0 10px rgba(var(--glow-rgb),.6), 0 0 20px rgba(var(--glow-rgb),.35); }
+  .seg-a { top:0; left:7px; width:56px; height:8px; }
+  .seg-f { top:7px; left:0; width:8px; height:49px; }
+  .seg-b { top:7px; right:0; width:8px; height:49px; }
+  .seg-g { top:56px; left:7px; width:56px; height:8px; }
+  .seg-e { top:63px; left:0; width:8px; height:49px; }
+  .seg-c { top:63px; right:0; width:8px; height:49px; }
+  .seg-d { top:112px; left:7px; width:56px; height:8px; }
+  .colon { display:flex; flex-direction:column; gap:28px; justify-content:center; height:120px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#1e1b18; transition: background-color .15s; }
+  .dot.on { background: var(--glow); box-shadow: 0 0 10px rgba(var(--glow-rgb),.6); }
+  .clock-readout { text-align:center; margin-top:14px; font-family: 'Courier New', monospace; }
+  .clock-readout .time { font-size:1.4rem; font-weight:700; color:var(--accent); }
+  .clock-readout .date { font-size:.75rem; color:var(--muted); margin-top:2px; }
+  .badges { display:flex; gap:8px; justify-content:center; margin-top:12px; flex-wrap:wrap; }
+  .badge { font-size:.68rem; font-weight:700; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:.4px; background:rgba(255,255,255,0.06); color:var(--muted); }
+  .badge.on { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge.warn { background: rgba(245,158,11,0.15); color: var(--amber); }
+  .badge.off { background: rgba(239,68,68,0.15); color: var(--red); }
+  /* CONTROLS */
+  .row { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; align-items:center; }
+  button {
+    padding: 9px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.05); color: var(--text); font-size: .8rem; font-weight:600;
+    cursor: pointer; transition: background .15s, opacity .15s;
+  }
+  button:hover { background: rgba(255,255,255,0.1); }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  button.primary { background: var(--accent); color:#000; border:none; }
+  button.primary:hover { background:#7cf2ff; }
+  button.danger { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); color: var(--red); }
+  button.warn { background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.4); color: var(--amber); }
+  .status-pill { font-size:.72rem; font-family: monospace; padding:3px 9px; border-radius:6px; background:rgba(255,255,255,0.05); color:var(--muted); }
+  .status-pill.live { background: rgba(34,197,94,0.15); color: var(--green); }
+  .hint { font-size:.72rem; color:var(--muted); line-height:1.5; margin-bottom: 14px; }
+  /* DIAG GRID */
+  .modules { display:grid; grid-template-columns:1fr; gap:14px; }
+  @media (min-width:640px) { .modules { grid-template-columns:1fr 1fr; } }
+  .module-card { background: rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:12px; }
+  .module-head { font-size:.78rem; font-weight:700; color:var(--accent); margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.05); }
+  .relay-row { display:grid; grid-template-columns: 34px 46px 1fr 44px 22px 16px; gap:6px; align-items:center; font-size:.72rem; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.03); }
+  .relay-row:last-child { border-bottom:none; }
+  .relay-row .ch { font-weight:700; }
+  .relay-row .pin { color:var(--muted); font-family:monospace; }
+  .relay-row .fn { color:var(--text); }
+  .relay-row .fn.unused { color: #4b5563; font-style: italic; }
+  .test-btn { padding:2px 6px; font-size:.65rem; }
+  .dot-ind { width:9px; height:9px; border-radius:50%; background:#374151; justify-self:center; }
+  .dot-ind.on { background: var(--glow); box-shadow: 0 0 6px rgba(var(--glow-rgb),.7); }
+  .confirm-chk { width:14px; height:14px; accent-color: var(--green); cursor:pointer; }
+  /* TERMINAL */
+  .terminal { background:#05070a; border:1px solid rgba(255,255,255,0.05); border-radius:10px; padding:12px; font-family: 'Courier New', monospace; font-size:.72rem; height:180px; overflow-y:auto; color:#22c55e; margin-top:16px; }
+  .term-row { white-space:pre-wrap; line-height:1.35; margin-bottom:2px; }
+  .term-row.sys { color: var(--accent); }
+  .term-row.err { color: var(--red); }
+  .term-row.warn { color: var(--amber); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>EEB3 SOLID-STATE CLOCK</h1>
+  <div class="subtitle">Virtual Clock &amp; Bulb Wiring Diagnostics — FW 4.3-DIAG</div>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: VIRTUAL CLOCK -->
+  <div class="panel">
+    <div class="panel-title">
+      <span>Virtual Clock</span>
+      <span class="status-pill" id="source-pill">Simulated (no hardware)</span>
+    </div>
+
+    <div class="chassis">
+      <div class="digit" id="d0"></div>
+      <div class="digit" id="d1"></div>
+      <div class="colon"><div class="dot" id="colon-top"></div><div class="dot" id="colon-bot"></div></div>
+      <div class="digit" id="d2"></div>
+      <div class="digit" id="d3"></div>
+    </div>
+
+    <div class="clock-readout">
+      <div class="time" id="readout-time">--:--</div>
+      <div class="date" id="readout-date">Brussels time (CET/CEST auto)</div>
+    </div>
+
+    <div class="badges">
+      <span class="badge" id="badge-dst">DST: --</span>
+      <span class="badge" id="badge-power">POWER: --</span>
+      <span class="badge" id="badge-diag">CLOCK MODE</span>
+      <span class="badge" id="badge-fw">FW: unknown</span>
+    </div>
+
+    <div class="terminal" id="terminal"></div>
+  </div>
+
+  <!-- RIGHT: CONNECTION + DIAGNOSTICS -->
+  <div class="panel">
+    <div class="panel-title">
+      <span>Hardware Connection</span>
+    </div>
+    <div class="hint">
+      Connect over USB (Chrome/Edge only — Web Serial API) to mirror the real board live and unlock relay-by-relay
+      bulb testing. Without a connection this page just runs a self-contained virtual clock using the same DST
+      and power-saving rules as the firmware.
+    </div>
+    <div class="row">
+      <button class="primary" id="btn-connect">🔌 Connect to Arduino</button>
+      <button id="btn-sync" disabled>🕒 Sync RTC to Computer Time</button>
+      <button id="btn-diag-enter" disabled>🛠 Enter Diagnostics (pause clock)</button>
+      <button id="btn-diag-exit" disabled>▶ Resume Clock</button>
+      <button class="danger" id="btn-diag-alloff" disabled>⛔ All Relays Off</button>
+    </div>
+
+    <div class="panel-title" style="margin-top:6px;">
+      <span>Relay ↔ Bulb Wiring Diagnostics</span>
+      <span class="hint" style="margin:0;">Test fires ON→OFF (~0.9s) so you can watch which physical bulb reacts</span>
+    </div>
+    <div class="modules" id="modules"></div>
+  </div>
+</div>
+
+<script>
+/* ── Constants copied 1:1 from EEB3_Clock_Mega_Relay_PowerSaving.ino ────── */
+const PINS = [
+  [22, 23, 24, 25, 26, 27, 28, 29],
+  [30, 31, 32, 33, 34, 35, 36, 37],
+  [38, 39, 40, 41, 42, 43, 44, 45],
+  [53, 52, 48, 50, 49, 51, 46, 47]
+];
+const SEG2RELAY = [1, 2, 5, 6, 4, 0, 3]; // a,b,c,d,e,f,g -> relay index
+const SEG_NAME = ['a','b','c','d','e','f','g'];
+const COLON_RELAY_INDEX = 7;
+const CLOCK_ON_MINS = 8 * 60;
+const CLOCK_OFF_MINS = 17 * 60;
+const MODULE_NAMES = ['Module 1 (Hours Tens)', 'Module 2 (Hours Units)', 'Module 3 (Minutes Tens)', 'Module 4 (Minutes Units)'];
+
+const SEG_MASKS = {
+  '0':0b0111111,'1':0b0000110,'2':0b1011011,'3':0b1001111,'4':0b1100110,
+  '5':0b1101101,'6':0b1111101,'7':0b0000111,'8':0b1111111,'9':0b1101111,
+  '-':0b1000000,' ':0b0000000
+};
+
+// relayFunction[m][i] = 'a'..'g' | 'colon' | 'unused'
+const relayFunction = PINS.map((row, m) => row.map((_, i) => {
+  if (m === 0 && i === COLON_RELAY_INDEX) return 'colon';
+  const seg = SEG2RELAY.indexOf(i);
+  return seg >= 0 ? SEG_NAME[seg] : 'unused';
+}));
+
+/* ── DST math, ported from the firmware's isEuSummerTime/lastSundayDay ──── */
+function lastSundayDay(year, month) {
+  const dim = [0,31,28,31,30,31,30,31,31,30,31,30,31];
+  let d = dim[month];
+  if (month === 2 && ((year%4===0 && year%100!==0) || year%400===0)) d = 29;
+  const dow = new Date(Date.UTC(year, month-1, d)).getUTCDay(); // 0=Sun
+  return d - dow;
+}
+function isEuSummerTimeUTC(u) {
+  const m = u.getUTCMonth()+1;
+  if (m < 3 || m > 10) return false;
+  if (m > 3 && m < 10) return true;
+  const ls = lastSundayDay(u.getUTCFullYear(), m);
+  if (m === 3) { if (u.getUTCDate()>ls) return true; if (u.getUTCDate()<ls) return false; return u.getUTCHours()>=1; }
+  if (u.getUTCDate()<ls) return true; if (u.getUTCDate()>ls) return false; return u.getUTCHours()<1;
+}
+function brusselsNow() {
+  const utc = new Date();
+  const summer = isEuSummerTimeUTC(utc);
+  const local = new Date(utc.getTime() + (summer ? 2 : 1) * 3600000);
+  return { local, summer };
+}
+
+/* ── DOM: build 7-seg digits ─────────────────────────────────────────── */
+function buildDigit(el) {
+  ['a','f','b','g','e','c','d'].forEach(s => {
+    const seg = document.createElement('div');
+    seg.className = `seg seg-${s}`;
+    seg.dataset.seg = s;
+    el.appendChild(seg);
+  });
+}
+['d0','d1','d2','d3'].forEach(id => buildDigit(document.getElementById(id)));
+
+function setDigit(el, ch) {
+  const mask = SEG_MASKS[ch] ?? 0;
+  el.querySelectorAll('.seg').forEach(seg => {
+    const idx = SEG_NAME.indexOf(seg.dataset.seg);
+    seg.classList.toggle('on', !!(mask & (1 << idx)));
+  });
+}
+function setColon(on) {
+  document.getElementById('colon-top').classList.toggle('on', on);
+  document.getElementById('colon-bot').classList.toggle('on', on);
+}
+function renderFrame(chars, colonOn) {
+  setDigit(document.getElementById('d0'), chars[0]);
+  setDigit(document.getElementById('d1'), chars[1]);
+  setDigit(document.getElementById('d2'), chars[2]);
+  setDigit(document.getElementById('d3'), chars[3]);
+  setColon(colonOn);
+}
+
+/* ── Virtual clock ticker (runs whenever hardware isn't driving) ───────── */
+let hardwareLive = false;
+function tickVirtual() {
+  if (hardwareLive) return;
+  const { local, summer } = brusselsNow();
+  const hh = local.getUTCHours(), mm = local.getUTCMinutes();
+  const mins = hh*60+mm;
+  const active = mins >= CLOCK_ON_MINS && mins < CLOCK_OFF_MINS;
+
+  document.getElementById('readout-time').textContent =
+    String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0') + ':' + String(local.getUTCSeconds()).padStart(2,'0');
+  document.getElementById('badge-dst').textContent = 'DST: ' + (summer ? 'CEST +2' : 'CET +1');
+  document.getElementById('badge-dst').className = 'badge on';
+  document.getElementById('badge-power').textContent = 'POWER: ' + (active ? 'ACTIVE' : 'NIGHT MODE');
+  document.getElementById('badge-power').className = 'badge ' + (active ? 'on' : 'off');
+
+  if (!active) { renderFrame([' ',' ',' ',' '], false); return; }
+  const d0 = hh<10 ? ' ' : String(Math.floor(hh/10));
+  renderFrame([d0, String(hh%10), String(Math.floor(mm/10)), String(mm%10)], true);
+}
+setInterval(tickVirtual, 1000);
+tickVirtual();
+
+/* ── Diagnostics grid ────────────────────────────────────────────────── */
+let relayState = Array(4).fill().map(() => Array(8).fill(false));
+const CONFIRM_KEY = 'eeb3_diag_confirmed_v1';
+let confirmed = {};
+try { confirmed = JSON.parse(localStorage.getItem(CONFIRM_KEY) || '{}'); } catch(e) { confirmed = {}; }
+function saveConfirmed() { try { localStorage.setItem(CONFIRM_KEY, JSON.stringify(confirmed)); } catch(e){} }
+
+const modulesEl = document.getElementById('modules');
+function buildGrid() {
+  modulesEl.innerHTML = '';
+  for (let m = 0; m < 4; m++) {
+    const card = document.createElement('div');
+    card.className = 'module-card';
+    const head = document.createElement('div');
+    head.className = 'module-head';
+    head.textContent = MODULE_NAMES[m];
+    card.appendChild(head);
+    for (let i = 0; i < 8; i++) {
+      const fn = relayFunction[m][i];
+      const row = document.createElement('div');
+      row.className = 'relay-row';
+      const key = `${m}-${i}`;
+      row.innerHTML = `
+        <span class="ch">IN${i+1}</span>
+        <span class="pin">pin${PINS[m][i]}</span>
+        <span class="fn ${fn==='unused'?'unused':''}">${fn === 'colon' ? 'Colon' : fn === 'unused' ? 'unused' : 'Seg ' + fn}</span>
+        <button class="test-btn" data-m="${m}" data-i="${i}" disabled>⚡ Test</button>
+        <span class="dot-ind" id="dot-${m}-${i}"></span>
+        <input type="checkbox" class="confirm-chk" data-key="${key}" ${confirmed[key] ? 'checked' : ''} title="Confirmed correct bulb lights up">
+      `;
+      card.appendChild(row);
+    }
+    modulesEl.appendChild(card);
+  }
+  modulesEl.querySelectorAll('.confirm-chk').forEach(chk => {
+    chk.addEventListener('change', e => {
+      confirmed[e.target.dataset.key] = e.target.checked;
+      saveConfirmed();
+    });
+  });
+  modulesEl.querySelectorAll('.test-btn').forEach(btn => {
+    btn.addEventListener('click', () => testRelay(+btn.dataset.m, +btn.dataset.i));
+  });
+}
+buildGrid();
+
+function setRelayIndicator(m, i, on) {
+  relayState[m][i] = on;
+  const dot = document.getElementById(`dot-${m}-${i}`);
+  if (dot) dot.classList.toggle('on', on);
+}
+
+/* ── Web Serial ─────────────────────────────────────────────────────── */
+let port = null, reader = null, writer = null, keepReading = false, diagMode = false;
+
+const btnConnect = document.getElementById('btn-connect');
+const btnSync = document.getElementById('btn-sync');
+const btnDiagEnter = document.getElementById('btn-diag-enter');
+const btnDiagExit = document.getElementById('btn-diag-exit');
+const btnAllOff = document.getElementById('btn-diag-alloff');
+const sourcePill = document.getElementById('source-pill');
+const badgeDiag = document.getElementById('badge-diag');
+const badgeFw = document.getElementById('badge-fw');
+
+function logTerm(msg, cls='') {
+  const term = document.getElementById('terminal');
+  const row = document.createElement('div');
+  row.className = 'term-row ' + cls;
+  row.textContent = msg;
+  term.appendChild(row);
+  term.scrollTop = term.scrollHeight;
+}
+
+function setDiagUI(on) {
+  diagMode = on;
+  badgeDiag.textContent = on ? 'DIAGNOSTIC MODE' : 'CLOCK MODE';
+  badgeDiag.className = 'badge ' + (on ? 'warn' : '');
+  document.querySelectorAll('.test-btn').forEach(b => b.disabled = !(hardwareLive && on));
+  btnAllOff.disabled = !(hardwareLive && on);
+  btnDiagEnter.disabled = !hardwareLive || on;
+  btnDiagExit.disabled = !hardwareLive || !on;
+}
+
+function handleLine(line) {
+  logTerm(line);
+
+  if (line.startsWith('[BOOT] EEB3 Clock FW=')) {
+    badgeFw.textContent = 'FW: ' + line.replace('[BOOT] EEB3 Clock FW=', '');
+  } else if (line.includes('[RELAY]')) {
+    if (line.includes('ALL OFF')) {
+      for (let m=0;m<4;m++) for (let i=0;i<8;i++) setRelayIndicator(m,i,false);
+    } else {
+      const mm = line.match(/M(\d)\s+IN(\d+)\s+pin\d+\s+->\s+(ON|OFF)/);
+      if (mm) setRelayIndicator(+mm[1], (+mm[2])-1, mm[3] === 'ON');
+    }
+  } else if (line.includes('[FRAME]')) {
+    const mm = line.match(/'(.)(.):(.)(.)'\s+colon=(ON|OFF)/);
+    if (mm) {
+      renderFrame([mm[1], mm[2], mm[3], mm[4]], mm[5] === 'ON');
+      document.getElementById('readout-time').textContent = `${mm[1]}${mm[2]}:${mm[3]}${mm[4]}`;
+    }
+  } else if (line.includes('[NIGHT] Night at')) {
+    document.getElementById('badge-power').textContent = 'POWER: NIGHT MODE';
+    document.getElementById('badge-power').className = 'badge off';
+  } else if (line.includes('Exited night mode')) {
+    document.getElementById('badge-power').textContent = 'POWER: ACTIVE';
+    document.getElementById('badge-power').className = 'badge on';
+  } else if (line.includes('[DST]')) {
+    const isSummer = line.includes('CEST');
+    document.getElementById('badge-dst').textContent = 'DST: ' + (isSummer ? 'CEST +2' : 'CET +1');
+    document.getElementById('badge-dst').className = 'badge on';
+  } else if (line.includes('[DIAG] ENTER')) {
+    setDiagUI(true);
+  } else if (line.includes('[DIAG] EXIT')) {
+    setDiagUI(false);
+  } else if (line.includes('[ERROR]')) {
+    logTerm(line, 'err');
+  }
+}
+
+async function sendCmd(cmd) {
+  if (!writer) return;
+  await writer.write(new TextEncoder().encode(cmd + '\n'));
+}
+
+async function readLoop() {
+  const decoder = new TextDecoderStream();
+  const closed = port.readable.pipeTo(decoder.writable);
+  reader = decoder.readable.getReader();
+  let buf = '';
+  try {
+    while (keepReading) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        buf += value;
+        let lines = buf.split('\n');
+        buf = lines.pop();
+        for (let l of lines) { l = l.trim(); if (l) handleLine(l); }
+      }
+    }
+  } catch (err) {
+    if (keepReading) logTerm('[WEB SERIAL ERROR] ' + err.message, 'err');
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    alert('Web Serial API not supported. Use Chrome, Edge, or Brave.');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+    writer = port.writable.getWriter();
+    keepReading = true;
+    hardwareLive = true;
+    sourcePill.textContent = 'Live hardware';
+    sourcePill.classList.add('live');
+    btnConnect.textContent = '🔌 Disconnect';
+    btnSync.disabled = false;
+    btnDiagEnter.disabled = false;
+    logTerm('[WEB SERIAL] Connected. Reading live board output...', 'sys');
+    readLoop();
+  } catch (err) {
+    logTerm('[WEB SERIAL ERROR] Connection failed: ' + err.message, 'err');
+    port = null; writer = null;
+  }
+}
+
+async function disconnect() {
+  keepReading = false;
+  hardwareLive = false;
+  try { if (reader) await reader.cancel(); } catch(e){}
+  try { if (writer) { writer.releaseLock(); } } catch(e){}
+  try { if (port) await port.close(); } catch(e){}
+  port = null; writer = null; reader = null;
+  sourcePill.textContent = 'Simulated (no hardware)';
+  sourcePill.classList.remove('live');
+  btnConnect.textContent = '🔌 Connect to Arduino';
+  btnSync.disabled = true;
+  setDiagUI(false);
+  logTerm('[WEB SERIAL] Disconnected.', 'sys');
+}
+
+btnConnect.addEventListener('click', () => port ? disconnect() : connect());
+btnSync.addEventListener('click', () => sendCmd('T' + Math.floor(Date.now()/1000)));
+btnDiagEnter.addEventListener('click', () => sendCmd('D1'));
+btnDiagExit.addEventListener('click', () => sendCmd('D0'));
+btnAllOff.addEventListener('click', async () => {
+  for (let m=0;m<4;m++) for (let i=0;i<8;i++) await sendCmd(`R${m}${i}0`);
+});
+
+async function testRelay(m, i) {
+  if (!hardwareLive || !diagMode) return;
+  await sendCmd(`R${m}${i}1`);
+  setTimeout(() => sendCmd(`R${m}${i}0`), 900);
+}
+</script>
+</body>
+</html>

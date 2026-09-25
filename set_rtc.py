@@ -28,10 +28,6 @@ import serial           # pip3 install pyserial
 # ── Configuration ─────────────────────────────────────────────────────────
 BAUD        = 9600
 TIMEOUT_S   = 30        # how long to wait for "READY" from the board
-# Brussels UTC offsets (the script uses Python's own DST detection,
-# which reads your Mac's system timezone — always correct on a Mac
-# that is set to the Europe/Brussels timezone).
-# We simply get UTC directly from time.gmtime() — no offset needed.
 
 # ── Port auto-detection ────────────────────────────────────────────────────
 def find_port():
@@ -41,8 +37,8 @@ def find_port():
         glob.glob("/dev/cu.usbserial*") +   # CH340 chip (Elegoo)
         glob.glob("/dev/cu.wchusbserial*")  # CH340 alternate name
     )
-    # Windows
-    candidates += [f"COM{i}" for i in range(3, 20)]
+    # Windows — scan COM1 through COM30 to cover any port assignment
+    candidates += [f"COM{i}" for i in range(1, 31)]
     for p in candidates:
         try:
             s = serial.Serial(p, BAUD, timeout=0.5)
@@ -87,7 +83,7 @@ def main():
         print("WARNING: Did not receive READY from the board.")
         print("         Sending timestamp anyway (board may still accept it).")
 
-    # Get exact UTC now — Python's time.time() is NTP-synced on macOS.
+    # Get exact UTC now
     utc_unix = int(time.time())
 
     # Send the command:  T<unix_timestamp>\n
@@ -99,10 +95,10 @@ def main():
 
     # ── Human-readable confirmation ────────────────────────────────────────
     utc_struct   = time.gmtime(utc_unix)
-    local_struct = time.localtime(utc_unix)   # uses Mac's timezone (Brussels)
+    local_struct = time.localtime(utc_unix)   # uses computer's local timezone
 
     print(f"UTC time set:   {time.strftime('%Y-%m-%d %H:%M:%S', utc_struct)} UTC")
-    print(f"Local display:  {time.strftime('%H:%M:%S', local_struct)} Brussels")
+    print(f"Local display:  {time.strftime('%H:%M:%S', local_struct)} Local Time")
 
     # Read one more confirmation line from the board
     time.sleep(0.5)

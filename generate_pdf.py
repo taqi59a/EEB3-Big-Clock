@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-EEB3 Clock — Technical Reference Booklet
-Run:    python3 generate_pdf.py
+EEB3 Clock — Technical Reference Booklet Generator
+Run:    python generate_pdf.py
 Output: EEB3_Clock_Reference.pdf  (same folder)
 """
 
@@ -58,22 +58,16 @@ S_CODE = ST(fontName="Courier",           fontSize=7.2,leading=10,  textColor=C_
 S_FOOT = ST(fontName="Helvetica-Oblique", fontSize=8,  leading=11,  textColor=C_MID, alignment=TA_CENTER)
 
 # Table cell styles — created once, reused everywhere
-# All body cells: Helvetica 7.5pt — fits comfortably in narrow columns
 S_TH = ST(fontName="Helvetica-Bold",  fontSize=8,   leading=11, textColor=C_WHITE)
 S_TD = ST(fontName="Helvetica",       fontSize=7.5, leading=11, textColor=C_DARK)
 S_TM = ST(fontName="Courier",         fontSize=7.2, leading=10, textColor=C_DARK)
 
-# ── Pre-computed column widths (must sum to BW = 493.23 pts) ──────────────
-# These are the column widths in pts for every table in the document.
-# NEVER pass arithmetic into make_table — use these named values only.
-
 def _w(*parts_mm):
     """Convert mm values to pts, give last col the remainder to guarantee sum=BW."""
-    pts = [round(p * mm, 2) for p in parts_mm[:-1]]
+    pts = [round(p * mm, 2) for p in parts_mm]
     pts.append(round(BW - sum(pts), 2))
     return pts
 
-# ── Helpers ────────────────────────────────────────────────────────────────
 def SP(h=3*mm):   return Spacer(1, h)
 def HR(t=0.5, c=C_LGREY): return HRFlowable(width="100%", thickness=t,
                                               color=c, spaceAfter=3*mm, spaceBefore=1*mm)
@@ -92,33 +86,22 @@ def section_box(text):
     return t
 
 def make_table(headers, rows, col_widths, mono_cols=None):
-    """
-    headers    : list of header strings
-    rows       : list of lists of strings
-    col_widths : list of widths in pts — use _w() helper, must sum to BW
-    mono_cols  : set of 0-based column indices to render in Courier
-    """
     if mono_cols is None:
         mono_cols = set()
 
-    # Verify total width (catches bugs immediately)
     total = round(sum(col_widths), 1)
     expected = round(BW, 1)
     assert abs(total - expected) < 1.0, \
         f"Column widths sum to {total:.1f} but BW={expected:.1f}"
 
-    # Header row
     data = [[Paragraph(h, S_TH) for h in headers]]
 
-    # Data rows — explicit Paragraph for every cell guarantees word-wrap
     for row in rows:
         data.append([
             Paragraph(str(cell), S_TM if ci in mono_cols else S_TD)
             for ci, cell in enumerate(row)
         ])
 
-    # Build alternating-row style commands explicitly
-    # (ROWBACKGROUNDS has a known rendering bug in ReportLab 4.5.x)
     cmds = [
         ("BACKGROUND",    (0, 0), (-1,  0),  C_BLACK),
         ("GRID",          (0, 0), (-1, -1),  0.3, C_LGREY),
@@ -129,7 +112,6 @@ def make_table(headers, rows, col_widths, mono_cols=None):
         ("TOPPADDING",    (0, 0), (-1, -1),  3),
         ("BOTTOMPADDING", (0, 0), (-1, -1),  3),
     ]
-    # Alternate grey/white rows starting from row 1
     for i in range(1, len(data)):
         bg = C_PGREY if i % 2 == 0 else C_WHITE
         cmds.append(("BACKGROUND", (0, i), (-1, i), bg))
@@ -138,11 +120,8 @@ def make_table(headers, rows, col_widths, mono_cols=None):
     t.setStyle(TableStyle(cmds))
     return t
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HEADER / FOOTER CALLBACKS
-# ─────────────────────────────────────────────────────────────────────────────
 def on_first_page(canvas, doc):
-    pass   # cover has no header/footer
+    pass
 
 def on_page(canvas, doc):
     canvas.saveState()
@@ -158,154 +137,88 @@ def on_page(canvas, doc):
     canvas.drawCentredString(w / 2, MB - 9*mm, str(doc.page))
     canvas.restoreState()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CODE TEXT (full listing)
-# ─────────────────────────────────────────────────────────────────────────────
-CODE_TEXT = """\
-/* ============================================================================
-   EEB3 BIG CLOCK  -  220V bulb 7-segment digits driven by 4x 8-relay modules
+# ─── CODE LISTING ───────────────────────────────────────────────────────────
+CODE_TEXT = r"""/* ============================================================================
+   EEB3 SOLID-STATE CLOCK - 220V bulb 7-segment digits
+   RELEASE BUILD: September 22, 2026 (FW 4.2-BASIC)
    ----------------------------------------------------------------------------
-   Board : Arduino MEGA 2560
-   Clock : DS3231 RTC (I2C)  -  RTC is kept in UTC, local time is computed in
-           software so Brussels daylight-saving is handled WITHOUT ever touching
-           the hardware (no buttons needed). Good for 20+ years.
+   Board  : Arduino MEGA 2560
+   Clock  : DS3231 RTC (I2C, SDA=20, SCL=21 on MEGA)
+   Baud   : 9600
+   ----------------------------------------------------------------------------
+   Stripped down to the essentials: accurate HH:MM time display, automatic
+   Brussels DST (CET/CEST) that recalculates every year forever (no hardcoded
+   dates), and a power-saving window that cuts the display outside school
+   hours. No period schedule, no boot self-test, no master-relay feature.
 
-   Display layout (HH:MM):
-        [Module 1]  [Module 2]   :   [Module 3]  [Module 4]
-         hours-tens  hours-units      mins-tens   mins-units
-                        colon (the two dots) = relay 8 of Module 1
+   VERIFIED HARDWARE MAPPING (2026-09-22):
+     Module 1 (Hours Tens)   : Pins 22-29 (IN1..IN8), IN8 = Colon
+     Module 2 (Hours Units)  : Pins 30-37 (IN1..IN8), IN8 = Unused
+     Module 3 (Minutes Tens) : Pins 38-45 (IN1..IN8)
+     Module 4 (Minutes Units): Pins { 53, 52, 48, 50, 49, 51, 46, 47 }
+                               IN3 = Pin 48 (Seg b - Top Right)
+                               IN6 = Pin 51 (Seg c - Bottom Right)
 
-   SEGMENT MAP  (matches your "clock frame numbered.jpg"):
-        relay 1 -> segment f (top-left)      x.1
-        relay 2 -> segment a (top)           x.2
-        relay 3 -> segment b (top-right)     x.3
-        relay 4 -> segment g (middle)        x.4
-        relay 5 -> segment e (bottom-left)   x.5
-        relay 6 -> segment c (bottom-right)  x.6
-        relay 7 -> segment d (bottom)        x.7
-        relay 8 -> (Module 1 only) the colon dots   1.8
-                   (relay 8 of modules 2,3,4 is unused)
+   SEGMENT TO RELAY MAPPING:
+     SEG2RELAY[7] order is a,b,c,d,e,f,g
+     a->1 (IN2), b->2 (IN3), c->5 (IN6), d->6 (IN7), e->4 (IN5), f->0 (IN1), g->3 (IN4)
+     const uint8_t SEG2RELAY[7] = { 1, 2, 5, 6, 4, 0, 3 };
 
-   BEHAVIOUR
-     - Normal:        shows HH:MM, colon ON steady (NEVER blinks -> saves the
-                      colon relay from millions of pointless switch cycles).
-     - At second 58:  shows "EEb3", colon OFF  (during active periods only).
-     - At second 59:  shows the current period number, colon OFF  (periods only).
-                      During breaks/gaps/before P1/after P9 -> plain time.
-     - Outside 08:00-17:00: all 32 relays OFF - completely dark.
+   POWER SAVING SCHEDULE:
+     CLOCK_ON_MINS  = 8 * 60;   // 08:00 AM
+     CLOCK_OFF_MINS = 17 * 60;  // 05:00 PM (17:00)
 
-   RELIABILITY ("long life") choices made on purpose:
-     - A relay is only switched when that segment actually changes state.
-     - The colon does not blink.
-     - All relays rest completely outside school hours (08:00-17:00).
-     - Hardware watchdog reboots the Mega automatically if it ever hangs.
-     - RTC is read defensively; garbage reads are ignored.
+   TIME SYNC: send T<10-digit-unix-UTC>, e.g. T1749736800
+
+   WIRING DIAGNOSTICS (for tracing bulb/relay connections):
+     D1        -> enter diagnostic mode (pauses the clock, all relays off)
+     D0        -> exit diagnostic mode (resumes normal clock display)
+     R<m><i><s>-> while in diagnostic mode, set module m(0-3) index i(0-7)
+                  to state s(0=off,1=on), e.g. R071 turns M0 IN8 ON
    ============================================================================ */
 
 #include <Wire.h>
 #include <RTClib.h>
 #include <avr/wdt.h>
 
-RTC_DS3231 rtc;
+#define FW_VERSION          "4.3-DIAG-2026-09-22"
+#define SERIAL_BAUD         9600
+#define SERIAL_WAIT_MS      8000UL
+#define RELAY_ACTIVE_LOW    false
 
-/* ----------------------------------------------------------------------------
-   1) RTC TIME SYNC  -  bulletproof two-stage system
+// Power Saving active schedule: 08:00 AM to 05:00 PM
+const int CLOCK_ON_MINS  = 8 * 60;   // 08:00 AM (480 minutes)
+const int CLOCK_OFF_MINS = 17 * 60;  // 05:00 PM (1020 minutes)
 
-   STAGE 1 (primary, millisecond-accurate):
-     After every upload, run  python3 set_rtc.py  in Terminal.
-     The script sends the exact current UTC to the Arduino over Serial.
-     The Arduino sets the RTC from that - accurate to within 1 second.
-     Your Mac clock is NTP-synced so this is always correct.
-
-   STAGE 2 (automatic fallback):
-     If the Python script is NOT run within SERIAL_WAIT_MS milliseconds,
-     the Arduino falls back to the compile-time stamp from your Mac clock,
-     automatically converted from Brussels local time to UTC.
-     This is typically 10-20 seconds behind real time - fine for a clock.
-
-   SERIAL_WAIT_MS   How long to wait for the Python script (milliseconds).
-                    5000 = 5 seconds.
----------------------------------------------------------------------------- */
-#define SERIAL_WAIT_MS   5000UL
-
-/* ----------------------------------------------------------------------------
-   2) RELAY POLARITY
-   The common blue 8-relay boards are ACTIVE LOW (IN pin LOW = relay ON).
-   If your board turns the bulb ON when the IN pin is HIGH, set this to false.
----------------------------------------------------------------------------- */
-#define RELAY_ACTIVE_LOW    true
-
-/* ----------------------------------------------------------------------------
-   3) DISPLAY OPTIONS
----------------------------------------------------------------------------- */
-#define BLANK_LEADING_HOUR_ZERO  true   // " 9:05" instead of "09:05"
-
-// EEb3 shows from second EEB3_START up to (not including) PERIOD_START  -> 4 seconds
-// Period label shows from PERIOD_START to :59                            -> 3 seconds
-// Total announcement window: 7 seconds per minute, only during active periods.
-// Each boundary is ONE relay transition - no extra clicking, safe for bulbs.
-const uint8_t EEB3_START   = 53;   // :53 :54 :55 :56  - "EEb3"
-const uint8_t PERIOD_START = 57;   // :57 :58 :59      - period label (e.g. "P  1")
-
-/* ----------------------------------------------------------------------------
-   3b) OPERATING HOURS
-   Outside these hours ALL relays are switched OFF completely.
-   This gives the relay contacts a long rest every day and maximises
-   the lifespan of all 32 relays and the light bulbs.
-   Times in LOCAL Brussels time, minutes from midnight.
-   08:00 = 8*60 = 480     17:00 = 17*60 = 1020
----------------------------------------------------------------------------- */
-const int CLOCK_ON_MINS  = 8  * 60;    // 08:00 - relays wake up
-const int CLOCK_OFF_MINS = 17 * 60;    // 17:00 - relays go to sleep
-
-/* ----------------------------------------------------------------------------
-   4) PIN MAP  -  each module's 8 IN pins kept together in one neat block.
-      Module N: { IN1, IN2, IN3, IN4, IN5, IN6, IN7, IN8 }
-      (index 0 = IN1 = relay 1 = segment f ... see SEGMENT MAP above)
----------------------------------------------------------------------------- */
 const uint8_t PINS[4][8] = {
-  { 22, 23, 24, 25, 26, 27, 28, 29 },   // Module 1  (hours tens)  + colon on IN8
-  { 30, 31, 32, 33, 34, 35, 36, 37 },   // Module 2  (hours units)
-  { 38, 39, 40, 41, 42, 43, 44, 45 },   // Module 3  (minutes tens)
-  { 46, 47, 48, 49, 50, 51, 52, 53 }    // Module 4  (minutes units)
+  { 22, 23, 24, 25, 26, 27, 28, 29 },  // Module 1 (Hours Tens)
+  { 30, 31, 32, 33, 34, 35, 36, 37 },  // Module 2 (Hours Units - IN8 unused)
+  { 38, 39, 40, 41, 42, 43, 44, 45 },  // Module 3 (Minutes Tens)
+  { 53, 52, 48, 50, 49, 51, 46, 47 }   // Module 4 (Minutes Units - IN3=Pin48, IN6=Pin51)
 };
-const uint8_t COLON_RELAY_INDEX = 7;    // IN8 of module 1 (0-based index 7)
 
-//                          a  b  c  d  e  f  g
-const uint8_t SEG2RELAY[7] = {1, 2, 5, 6, 4, 0, 3};
+const uint8_t COLON_RELAY_INDEX = 7;
 
-/* ----------------------------------------------------------------------------
-   5) BELL SCHEDULE  (LOCAL Brussels time, minutes from midnight)
-      Edit freely. disp must be exactly 4 characters.
-      Break (10:55-11:15) is a gap - no entry - clock shows plain time.
----------------------------------------------------------------------------- */
-struct Period { int startMins; int endMins; const char* disp; };
+// SEG2RELAY[seg] = relay index (a,b,c,d,e,f,g)
+const uint8_t SEG2RELAY[7] = { 1, 2, 5, 6, 4, 0, 3 };
+const char    SEG_NAME[7]  = {'a','b','c','d','e','f','g'};
 
-Period schedule[] = {
-  { 8 * 60 + 30,  9 * 60 + 15, "P  1" },
-  { 9 * 60 + 20, 10 * 60 +  5, "P  2" },
-  {10 * 60 + 10, 10 * 60 + 55, "P  3" },
-  // 10:55 - 11:15  BREAK  - gap in schedule, shows time only
-  {11 * 60 + 15, 12 * 60 +  0, "P  4" },
-  {12 * 60 +  5, 12 * 60 + 50, "P  5" },
-  {13 * 60 +  0, 13 * 60 + 45, "P  6" },
-  {13 * 60 + 50, 14 * 60 + 35, "P  7" },
-  {14 * 60 + 40, 15 * 60 + 25, "P  8" },
-  {15 * 60 + 30, 16 * 60 + 15, "P  9" }
-  // 16:15 - 17:00  after last period - shows time only
-};
-const int NUM_PERIODS = sizeof(schedule) / sizeof(schedule[0]);
-
-const char* getActivePeriod(int localMins) {
-  for (int i = 0; i < NUM_PERIODS; i++)
-    if (localMins >= schedule[i].startMins && localMins < schedule[i].endMins)
-      return schedule[i].disp;
-  return nullptr;
-}
+bool relayState[4][8];
+RTC_DS3231 rtc;
+static bool rtcOk = false;
+static bool diagMode = false;
 
 /* ============================================================================
-   7-SEGMENT FONT
-   bit0=a bit1=b bit2=c bit3=d bit4=e bit5=f bit6=g
+   SERIAL TAG HELPERS
+   ============================================================================ */
+void tag(const __FlashStringHelper* t) {
+  Serial.print(F("[")); Serial.print(t); Serial.print(F("] "));
+}
+void sep() { Serial.println(F("------------------------------------------------------------")); }
+
+/* ============================================================================
+   SEGMENT FONT
+   bit0=a  bit1=b  bit2=c  bit3=d  bit4=e  bit5=f  bit6=g
    ============================================================================ */
 byte segMask(char ch) {
   switch (ch) {
@@ -319,28 +232,69 @@ byte segMask(char ch) {
     case '7': return 0b0000111;
     case '8': return 0b1111111;
     case '9': return 0b1101111;
-    case 'E': return 0b1111001;
-    case 'b': return 0b1111100;
-    case 'P': return 0b1110011;
-    case 'r': return 0b1010000;
-    case 'c': return 0b1011000;
-    case 'd': return 0b1011110;
-    case '-': return 0b1000000;
+    case '-': return 0b1000000;   // middle bar only (error indicator)
     case ' ':
     default:  return 0b0000000;
   }
 }
 
 /* ============================================================================
-   EU / BRUSSELS DAYLIGHT-SAVING  (rule based, no lookup table needed)
-   Summer time (CEST, UTC+2): last Sunday of March 01:00 UTC ->
-                              last Sunday of October 01:00 UTC.
-   Otherwise winter time (CET, UTC+1).
+   RELAY ENGINE
+   ============================================================================ */
+inline void writeRelay(uint8_t module, uint8_t idx, bool on) {
+  if (relayState[module][idx] == on) return;
+  relayState[module][idx] = on;
+  digitalWrite(PINS[module][idx], (on == RELAY_ACTIVE_LOW) ? LOW : HIGH);
+  tag(F("RELAY"));
+  Serial.print(F("M")); Serial.print(module);
+  Serial.print(F(" IN")); Serial.print(idx + 1);
+  Serial.print(F(" pin")); Serial.print(PINS[module][idx]);
+  Serial.print(F(" -> ")); Serial.println(on ? F("ON") : F("OFF"));
+}
+
+void allRelaysOff() {
+  tag(F("RELAY")); Serial.println(F("ALL OFF"));
+  for (uint8_t m = 0; m < 4; m++)
+    for (uint8_t i = 0; i < 8; i++)
+      writeRelay(m, i, false);
+}
+
+void writeSegment(uint8_t module, uint8_t seg, bool on) {
+  writeRelay(module, SEG2RELAY[seg], on);
+}
+
+void applyDigit(uint8_t module, char ch) {
+  byte mask = segMask(ch);
+  tag(F("DIGIT"));
+  Serial.print(F("M")); Serial.print(module);
+  Serial.print(F(" char='")); Serial.print(ch);
+  Serial.print(F("'  mask=0b"));
+  for (int b = 6; b >= 0; b--) Serial.print((mask >> b) & 1);
+  Serial.print(F("  segs: "));
+  for (uint8_t s = 0; s < 7; s++)
+    if (mask & (1 << s)) { Serial.print(SEG_NAME[s]); Serial.print(' '); }
+  Serial.println();
+  for (uint8_t seg = 0; seg < 7; seg++)
+    writeSegment(module, seg, (bool)(mask & (1 << seg)));
+}
+
+void renderFrame(const char d[4], bool colonOn) {
+  tag(F("FRAME"));
+  Serial.print(F("'")); Serial.print(d[0]); Serial.print(d[1]);
+  Serial.print(F(":")); Serial.print(d[2]); Serial.print(d[3]);
+  Serial.print(F("'  colon=")); Serial.println(colonOn ? F("ON") : F("OFF"));
+  for (uint8_t m = 0; m < 4; m++) applyDigit(m, d[m]);
+  writeRelay(0, COLON_RELAY_INDEX, colonOn);
+}
+
+/* ============================================================================
+   DST / TIMEZONE (Brussels CET/CEST, EU rule - recalculated every year)
    ============================================================================ */
 uint8_t lastSundayDay(uint16_t year, uint8_t month) {
-  DateTime lastDay(year, month, 31, 0, 0, 0);
-  uint8_t dow = lastDay.dayOfTheWeek();        // 0 = Sunday
-  return 31 - dow;
+  const uint8_t dim[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+  uint8_t d = dim[month];
+  if (month == 2 && (((year%4==0)&&(year%100!=0))||(year%400==0))) d = 29;
+  return d - (uint8_t)DateTime(year, month, d, 0, 0, 0).dayOfTheWeek();
 }
 
 bool isEuSummerTime(const DateTime& u) {
@@ -348,208 +302,250 @@ bool isEuSummerTime(const DateTime& u) {
   if (m < 3 || m > 10) return false;
   if (m > 3 && m < 10) return true;
   uint8_t ls = lastSundayDay(u.year(), m);
-  if (m == 3) {
-    if (u.day() > ls) return true;
-    if (u.day() < ls) return false;
-    return u.hour() >= 1;
-  } else {
-    if (u.day() < ls) return true;
-    if (u.day() > ls) return false;
-    return u.hour() < 1;
-  }
+  if (m == 3) { if (u.day()>ls) return true; if (u.day()<ls) return false; return u.hour()>=1; }
+  if (u.day()<ls) return true; if (u.day()>ls) return false; return u.hour()<1;
+}
+
+bool isLocalSummerTime(const DateTime& l) {
+  uint8_t m = l.month();
+  if (m < 3 || m > 10) return false;
+  if (m > 3 && m < 10) return true;
+  uint8_t ls = lastSundayDay(l.year(), m);
+  if (m == 3) { if (l.day()>ls) return true; if (l.day()<ls) return false; return l.hour()>=2; }
+  if (l.day()<ls) return true; if (l.day()>ls) return false; return l.hour()<3;
 }
 
 DateTime utcToBrussels(const DateTime& utc) {
-  int offsetHours = isEuSummerTime(utc) ? 2 : 1;
-  return utc + TimeSpan(0, offsetHours, 0, 0);
+  bool s = isEuSummerTime(utc);
+  tag(F("DST"));
+  Serial.print(s ? F("CEST+2  ") : F("CET+1  "));
+  DateTime local = utc + TimeSpan(0, s ? 2 : 1, 0, 0);
+  Serial.println(local.timestamp());
+  return local;
 }
 
-bool isLocalBrusselsSummerTime(const DateTime& local) {
-  uint8_t m = local.month();
-  if (m < 3 || m > 10) return false;
-  if (m > 3 && m < 10) return true;
-  uint8_t ls = lastSundayDay(local.year(), m);
-  if (m == 3) {
-    if (local.day() > ls) return true;
-    if (local.day() < ls) return false;
-    return local.hour() >= 2;
-  } else {
-    if (local.day() < ls) return true;
-    if (local.day() > ls) return false;
-    return local.hour() < 3;
-  }
-}
-
-DateTime brusselsLocalToUtc(const DateTime& local) {
-  int offsetHours = isLocalBrusselsSummerTime(local) ? 2 : 1;
-  return local - TimeSpan(0, offsetHours, 0, 0);
+DateTime localToUtc(const DateTime& local) {
+  return local - TimeSpan(0, isLocalSummerTime(local) ? 2 : 1, 0, 0);
 }
 
 /* ============================================================================
-   RELAY OUTPUT with change-tracking (only switch when state actually changes)
+   RTC DIAGNOSTIC
    ============================================================================ */
-bool relayState[4][8];
+void rtcDiagnostic() {
+  sep();
+  tag(F("RTC")); Serial.println(F("=== RTC Diagnostic ==="));
 
-inline void writeRelay(uint8_t module, uint8_t idx, bool on) {
-  if (relayState[module][idx] == on) return;
-  relayState[module][idx] = on;
-  uint8_t level = (on == RELAY_ACTIVE_LOW) ? LOW : HIGH;
-  digitalWrite(PINS[module][idx], level);
+  Wire.beginTransmission(0x68);
+  uint8_t err = Wire.endTransmission();
+  tag(F("RTC")); Serial.print(F("I2C 0x68: "));
+  if (err == 0) Serial.println(F("OK - device ACK"));
+  else { Serial.print(F("FAIL code=")); Serial.print(err); Serial.println(F(" CHECK SDA(20)/SCL(21)")); }
+
+  tag(F("RTC")); Serial.print(F("rtc.begin(): ")); Serial.println(rtcOk ? F("OK") : F("FAILED"));
+  if (!rtcOk) { sep(); return; }
+
+  bool lp = rtc.lostPower();
+  tag(F("RTC")); Serial.println(lp ? F("lostPower: TRUE - NEEDS SYNC") : F("lostPower: false - OK"));
+
+  DateTime now = rtc.now();
+  tag(F("RTC")); Serial.print(F("UTC raw: ")); Serial.print(now.timestamp());
+  Serial.print(F("  unix=")); Serial.println(now.unixtime());
+
+  tag(F("RTC")); Serial.print(F("Year check: "));
+  Serial.println((now.year()>=2024 && now.year()<=2099) ? F("PASS") : F("FAIL - sync needed!"));
+
+  tag(F("RTC")); Serial.print(F("Temp: ")); Serial.print(rtc.getTemperature(),1); Serial.println(F("C"));
+
+  DateTime local = utcToBrussels(now);
+  tag(F("RTC")); Serial.print(F("Brussels: "));
+  if(local.hour()<10)Serial.print('0'); Serial.print(local.hour());
+  Serial.print(':');
+  if(local.minute()<10)Serial.print('0'); Serial.println(local.minute());
+
+  int lm = (int)local.hour()*60+(int)local.minute();
+  tag(F("RTC")); Serial.print(F("Local mins=")); Serial.print(lm);
+  Serial.print(F("  window=")); Serial.print(CLOCK_ON_MINS);
+  Serial.print(F("-")); Serial.print(CLOCK_OFF_MINS);
+  Serial.println((lm>=CLOCK_ON_MINS&&lm<CLOCK_OFF_MINS) ? F("  ACTIVE") : F("  NIGHT MODE"));
+  sep();
 }
 
-// Turn every relay OFF - used outside operating hours.
-// writeRelay() skips pins already off, so zero clicks once already dark.
-void allRelaysOff() {
-  for (uint8_t m = 0; m < 4; m++)
-    for (uint8_t i = 0; i < 8; i++)
-      writeRelay(m, i, false);
-}
+/* ============================================================================
+   NON-BLOCKING SERIAL COMMAND PARSER
+   Send: T1749736800  (T + 10 digit UTC unix timestamp)
+   ============================================================================ */
+static char           cmdBuf[16];
+static uint8_t        cmdPos          = 0;
+static bool           inNightMode     = false;
+static unsigned long  lastRenderedKey = 0xFFFFFFFFUL;
+static uint32_t       loopCount       = 0;
+static uint8_t        heartbeat       = 0;
 
-void applyDigit(uint8_t module, char ch) {
-  byte mask = segMask(ch);
-  for (uint8_t seg = 0; seg < 7; seg++) {
-    bool on = mask & (1 << seg);
-    writeRelay(module, SEG2RELAY[seg], on);
+void checkSerialCommands() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (cmdPos > 0) {
+        cmdBuf[cmdPos] = '\0';
+        if (cmdBuf[0] == 'T' && strlen(cmdBuf) >= 11) {
+          unsigned long v = strtoul(cmdBuf + 1, nullptr, 10);
+          if (v > 1700000000UL) {
+            rtc.adjust(DateTime(v));
+            tag(F("SYNC")); Serial.print(F("RTC set UTC=")); Serial.println(DateTime(v).timestamp());
+            rtcDiagnostic();
+          }
+        } else if (cmdBuf[0] == 'D' && strlen(cmdBuf) == 2) {
+          diagMode = (cmdBuf[1] == '1');
+          allRelaysOff();
+          lastRenderedKey = 0xFFFFFFFFUL;
+          tag(F("DIAG")); Serial.println(diagMode ? F("ENTER") : F("EXIT"));
+        } else if (cmdBuf[0] == 'R' && strlen(cmdBuf) == 4 && diagMode) {
+          uint8_t m = cmdBuf[1]-'0', i = cmdBuf[2]-'0', s = cmdBuf[3]-'0';
+          if (m < 4 && i < 8) writeRelay(m, i, s != 0);
+        }
+        cmdPos = 0;
+      }
+    } else if (cmdPos < 15) {
+      cmdBuf[cmdPos++] = c;
+    }
   }
-}
-
-void setColon(bool on) {
-  writeRelay(0, COLON_RELAY_INDEX, on);
-}
-
-void renderFrame(const char d[4], bool colonOn) {
-  for (uint8_t m = 0; m < 4; m++) applyDigit(m, d[m]);
-  setColon(colonOn);
 }
 
 /* ============================================================================
    SETUP
    ============================================================================ */
 void setup() {
-  Serial.begin(9600);
-
-  // Force all relay outputs OFF before enabling them (no boot glitch)
-  for (uint8_t m = 0; m < 4; m++) {
-    for (uint8_t i = 0; i < 8; i++) {
-      uint8_t offLevel = RELAY_ACTIVE_LOW ? HIGH : LOW;
-      digitalWrite(PINS[m][i], offLevel);
-      pinMode(PINS[m][i], OUTPUT);
-      digitalWrite(PINS[m][i], offLevel);
-      relayState[m][i] = false;
-    }
+  for (uint8_t m=0;m<4;m++) for (uint8_t i=0;i<8;i++) {
+    uint8_t off = RELAY_ACTIVE_LOW ? HIGH : LOW;
+    digitalWrite(PINS[m][i], off);
+    pinMode(PINS[m][i], OUTPUT);
+    digitalWrite(PINS[m][i], off);
+    relayState[m][i] = false;
   }
 
+  Serial.begin(SERIAL_BAUD);
   Wire.begin();
-  if (!rtc.begin()) {
-    Serial.println(F("RTC not found! Check wiring (SDA=20, SCL=21)."));
-  }
 
   Serial.println(F("READY"));
 
-  bool synced = false;
-  unsigned long waitStart = millis();
-  while ((millis() - waitStart) < SERIAL_WAIT_MS) {
-    if (Serial.available()) {
-      char cmd = Serial.read();
-      if (cmd == 'T') {
-        unsigned long unixUtc = Serial.parseInt();
-        if (unixUtc > 1700000000UL) {
-          rtc.adjust(DateTime(unixUtc));
-          Serial.print(F("RTC SET via script -> UTC: "));
-          Serial.println(DateTime(unixUtc).timestamp());
-          synced = true;
-          break;
-        }
-      }
+  sep();
+  tag(F("BOOT")); Serial.print(F("EEB3 Clock FW=")); Serial.println(F(FW_VERSION));
+  tag(F("BOOT")); Serial.print(F("Compiled ")); Serial.print(F(__DATE__)); Serial.print(' '); Serial.println(F(__TIME__));
+  tag(F("BOOT")); Serial.print(F("Window: ")); Serial.print(CLOCK_ON_MINS); Serial.print(F("-")); Serial.println(CLOCK_OFF_MINS);
+  tag(F("BOOT")); Serial.println(RELAY_ACTIVE_LOW ? F("Relay: ACTIVE LOW") : F("Relay: ACTIVE HIGH"));
+  sep();
+
+  rtcOk = rtc.begin();
+  rtcDiagnostic();
+
+  tag(F("BOOT")); Serial.println(F("Waiting 8s for serial sync (T<unix>)..."));
+  unsigned long ws = millis(), ld = millis();
+  while (millis() - ws < SERIAL_WAIT_MS) {
+    wdt_reset();
+    if (millis() - ld >= 1000UL) {
+      ld = millis();
+      Serial.print('.');
     }
+    checkSerialCommands();
+  }
+  Serial.println();
+
+  if (rtcOk && rtc.lostPower()) {
+    DateTime cl(F(__DATE__), F(__TIME__));
+    DateTime uf = localToUtc(cl);
+    rtc.adjust(uf);
+    tag(F("SYNC")); Serial.print(F("Fallback compile-time UTC=")); Serial.println(uf.timestamp());
   }
 
-  if (!synced) {
-    DateTime compileLocal(F(__DATE__), F(__TIME__));
-    DateTime utcNow = brusselsLocalToUtc(compileLocal);
-    rtc.adjust(utcNow);
-    Serial.print(F("RTC FALLBACK (compile time) -> UTC: "));
-    Serial.println(utcNow.timestamp());
-    Serial.println(F("Run  python3 set_rtc.py  for exact time next upload."));
-  }
-
+  tag(F("BOOT")); Serial.println(F("Watchdog WDTO_8S"));
   wdt_enable(WDTO_8S);
+  tag(F("BOOT")); Serial.println(F("Entering main loop"));
+  sep();
 }
 
 /* ============================================================================
-   LOOP
+   MAIN LOOP
    ============================================================================ */
-int   lastRenderedSecondKey = -1;
-
 void loop() {
   wdt_reset();
+  loopCount++;
+
+  checkSerialCommands();
+  if (diagMode) return; // manual relay commands only; clock paused
 
   static unsigned long lastTick = 0;
-  if (millis() - lastTick < 200) return;
+  if (millis()-lastTick < 250UL) return;
   lastTick = millis();
 
   DateTime utc = rtc.now();
-  if (utc.year() < 2024 || utc.year() > 2099) return;
 
-  DateTime local = utcToBrussels(utc);
-  uint8_t hh = local.hour();
-  uint8_t mm = local.minute();
-  uint8_t ss = local.second();
-  int localMins = hh * 60 + mm;
+  if (++heartbeat >= 20) {
+    heartbeat = 0;
+    tag(F("LOOP"));
+    Serial.print(F("tick #")); Serial.print(loopCount);
+    Serial.print(F("  UTC=")); Serial.print(utc.timestamp());
+    Serial.print(F("  temp=")); Serial.print(rtc.getTemperature(),1); Serial.println(F("C"));
+  }
 
-  // Outside 08:00-17:00: all relays off. Sentinel -2 prevents repeat clicks.
-  if (localMins < CLOCK_ON_MINS || localMins >= CLOCK_OFF_MINS) {
-    if (lastRenderedSecondKey != -2) {
-      lastRenderedSecondKey = -2;
-      allRelaysOff();
-      Serial.println(F("Clock OFF (outside operating hours)."));
-    }
+  // Year sanity - show dashes if RTC is corrupt
+  if (utc.year()<2024 || utc.year()>2099) {
+    tag(F("ERROR")); Serial.print(F("Bad year=")); Serial.println(utc.year());
+    char bad[4]={'-','-','-','-'};
+    renderFrame(bad, false);
+    delay(1000);
     return;
   }
 
-  // EEb3 (:53-:56, 4 s) and period label (:57-:59, 3 s) are shown ONLY when
-  // a period is active. Breaks, gaps, before P1, after P9 -> plain time always.
+  bool summer    = isEuSummerTime(utc);
+  int8_t offset  = summer ? 2 : 1;
+  DateTime local = utc + TimeSpan(0, offset, 0, 0);
+  uint8_t hh     = local.hour();
+  uint8_t mm     = local.minute();
+  int localMins  = (int)hh*60+(int)mm;
+
+  // Power saving: relays off outside the active window
+  if (localMins<CLOCK_ON_MINS || localMins>=CLOCK_OFF_MINS) {
+    if (!inNightMode) {
+      inNightMode=true;
+      lastRenderedKey=0xFFFFFFFFUL;
+      allRelaysOff();
+      tag(F("NIGHT"));
+      Serial.print(F("Night at "));
+      if(hh<10)Serial.print('0'); Serial.print(hh); Serial.print(':');
+      if(mm<10)Serial.print('0'); Serial.println(mm);
+    }
+    return;
+  }
+  if (inNightMode) {
+    inNightMode=false;
+    tag(F("NIGHT")); Serial.println(F("Exited night mode"));
+  }
+
+  // Build display frame: HH:MM
   char frame[4];
-  bool colonOn;
+  frame[0] = (hh<10) ? ' ' : (char)('0'+hh/10);
+  frame[1] = (char)('0'+hh%10);
+  frame[2] = (char)('0'+mm/10);
+  frame[3] = (char)('0'+mm%10);
 
-  const char* activePeriod = getActivePeriod(localMins);
-  bool periodActive = (activePeriod != nullptr);
+  unsigned long key =
+    ((unsigned long)(uint8_t)frame[0]<<24) |
+    ((unsigned long)(uint8_t)frame[1]<<16) |
+    ((unsigned long)(uint8_t)frame[2]<< 8) |
+     (unsigned long)(uint8_t)frame[3];
 
-  if (periodActive && ss >= EEB3_START && ss < PERIOD_START) {
-    // EEb3 for 4 seconds
-    frame[0] = 'E'; frame[1] = 'E'; frame[2] = 'b'; frame[3] = '3';
-    colonOn = false;
+  if (key != lastRenderedKey) {
+    lastRenderedKey = key;
+    tag(F("DISPLAY"));
+    Serial.print(F("Time -> "));
+    if(hh<10)Serial.print(' '); Serial.print(hh); Serial.print(':');
+    if(mm<10)Serial.print('0'); Serial.print(mm);
+    Serial.print(F("  ")); Serial.println(summer ? F("CEST+2") : F("CET+1"));
+    renderFrame(frame, true);
+    sep();
   }
-  else if (periodActive && ss >= PERIOD_START) {
-    // Period label for 3 seconds
-    frame[0] = activePeriod[0]; frame[1] = activePeriod[1];
-    frame[2] = activePeriod[2]; frame[3] = activePeriod[3];
-    colonOn = false;
-  }
-  else {
-    frame[0] = (BLANK_LEADING_HOUR_ZERO && hh < 10) ? ' ' : ('0' + hh / 10);
-    frame[1] = '0' + hh % 10;
-    frame[2] = '0' + mm / 10;
-    frame[3] = '0' + mm % 10;
-    colonOn = true;
-  }
-
-  int key = (frame[0] << 24) ^ (frame[1] << 16) ^ (frame[2] << 8)
-            ^ frame[3] ^ (colonOn ? 0x100000 : 0);
-  if (key != lastRenderedSecondKey) {
-    lastRenderedSecondKey = key;
-    renderFrame(frame, colonOn);
-
-    Serial.print(F("UTC "));   Serial.print(utc.timestamp());
-    Serial.print(F("  Local "));
-    Serial.print(hh); Serial.print(':');
-    if (mm < 10) Serial.print('0'); Serial.print(mm);
-    Serial.print(F("  period=")); Serial.print(periodActive ? activePeriod : "none");
-    Serial.print(F("  showing "));
-    Serial.write((const uint8_t*)frame, 4);
-    Serial.print(F("  colon=")); Serial.println(colonOn ? "ON" : "off");
-  }
-}"""
+}
+"""
 
 # ═════════════════════════════════════════════════════════════════════════════
 # STORY
@@ -563,11 +559,13 @@ story += [SP(28*mm),
           HR(1.5, C_BLACK), SP(3*mm),
           Paragraph("220 V Bulb 7-Segment Display<br/>"
                     "Driven by 4 x 8-Relay Modules<br/>"
-                    "Arduino MEGA 2560  +  DS3231 RTC", S_CVB),
+                    "Arduino MEGA 2560  +  DS3231 RTC<br/>"
+                    "Power Architecture: Parallel 5V 3A Adapter with Opto-Isolation", S_CVB),
           SP(50*mm), HR(0.5),
           Paragraph("Prepared by: <b>Taqi Abbas</b>", S_CVM),
           Paragraph("Location: European School of Brussels, Ixelles", S_CVM),
           Paragraph("Required library: RTClib by Adafruit (v2.x)", S_CVM),
+          Paragraph("Firmware: FW_VERSION \"4.3-DIAG-2026-09-22\"", S_CVM),
           PageBreak()]
 
 # ─── 1. SYSTEM OVERVIEW ──────────────────────────────────────────────────────
@@ -586,7 +584,7 @@ story += [section_box("1.  SYSTEM OVERVIEW"), SP(3*mm),
             [["Digit 1 — hours tens",    "Module 1", "22–29", "IN8 (pin 29) = colon dots"],
              ["Digit 2 — hours units",   "Module 2", "30–37", "IN8 (pin 37) unused"],
              ["Digit 3 — minutes tens",  "Module 3", "38–45", "IN8 (pin 45) unused"],
-             ["Digit 4 — minutes units", "Module 4", "46–53", "IN8 (pin 53) unused"]],
+             ["Digit 4 — minutes units", "Module 4", "46–53 (non-sequential — see 3c)", "IN8 (pin 47) unused; IN3=pin48, IN6=pin51 (wiring-swap fix)"]],
             _w(50, 28, 35),
             mono_cols={1, 2}),
 
@@ -613,27 +611,8 @@ story += [section_box("2.  HARDWARE LIST"), SP(3*mm),
             ["Component", "Qty"],
             [["Arduino MEGA 2560 (Elegoo or genuine)", "1"],
              ["DS3231 RTC module with CR2032 coin cell", "1"],
-             ["8-channel 5 V relay module — active-LOW blue boards", "4"],
-             ["External 5 V DC supply, minimum 3 A (relay boards only)", "1"],
-             ["USB-B cable (printer style) for programming", "1"],
-             ["220 V E27 bulbs — one per segment, two for the colon", "30"],
-             ["Mains-rated cable for bulb wiring", "as needed"],
-             ["CR2032 spare coin cell (RTC backup battery)", "1 spare"],
-             ["DuPont jumper wires, female-to-male", "~50"],
-             ["Screw-terminal power rail for 5 V distribution", "1"]],
-            _w(18),   # 1 column fills BW, qty appended
-          ),
-          PageBreak()]
-
-# Wait — hardware needs 2 cols. Fix:
-story.pop()  # remove PageBreak
-story.pop()  # remove that table
-story += [make_table(
-            ["Component", "Qty"],
-            [["Arduino MEGA 2560 (Elegoo or genuine)", "1"],
-             ["DS3231 RTC module with CR2032 coin cell", "1"],
-             ["8-channel 5 V relay module — active-LOW blue boards", "4"],
-             ["External 5 V DC supply, minimum 3 A (relay boards only)", "1"],
+             ["8-channel 5 V relay module — confirmed active-HIGH boards", "4"],
+             ["External 5 V DC supply, minimum 3 A (regulated adapter)", "1"],
              ["USB-B cable (printer style) for programming", "1"],
              ["220 V E27 bulbs — one per segment, two for the colon", "30"],
              ["Mains-rated cable for bulb wiring", "as needed"],
@@ -648,19 +627,20 @@ story += [make_table(
 story += [section_box("3.  CONNECTIONS"), SP(3*mm)]
 
 # 3a Power
-story += [Paragraph("3a.  Power architecture", S_H1),
+story += [Paragraph("3a.  Power architecture (5V / 3A Parallel Supply with Opto-Isolation)", S_H1),
           Paragraph(
-            "Relay coils draw up to 2.5 A combined — far beyond what the Mega USB "
-            "or onboard 5 V regulator can supply. Use a separate external 5 V / 3 A "
-            "supply for the relay boards. The Mega 5 V pin powers only the RTC (~2 mA).", S_BODY),
+            "To provide enough power for all 4 relay boards (up to 2.5 A when active) and the Arduino Mega, "
+            "a single external 5 V / 3 A DC regulated adapter is used. To isolate the Arduino from relay coil noise, "
+            "remove the yellow jumpers between VCC and JD-VCC on the 3-pin headers of all relay boards. "
+            "This runs the boards in opto-isolated mode.", S_BODY),
           make_table(
             ["Connection", "From", "To", "Note"],
-            [["Relay board power",  "External 5V (+)", "All 4 boards VCC and JD-VCC", "Daisy-chain or power rail"],
-             ["Relay board ground", "External 5V (−)", "All 4 boards GND", "Must also join Mega GND"],
-             ["Mega ground bridge", "Mega GND near pin 53", "Common ground rail", "Ties both supplies together"],
-             ["RTC power",         "Mega 5V pin",     "RTC VCC", "Only ~2 mA — safe from Mega"],
-             ["RTC ground",        "Mega GND",        "RTC GND", ""],
-             ["Mega power input",  "USB or 7-12 V barrel", "Mega board only", "Independent of relay supply"]],
+            [["Main Adapter Power (+)", "External 5V (+)", "Mega 5V pin and all JD-VCC pins", "Jumper on 3-pin relay headers MUST be removed"],
+             ["Main Adapter Ground (-)", "External 5V (−)", "Mega GND pin and all relay GND pins (3-pin header)", "Common ground return for logic & coils"],
+             ["Optocoupler Power",       "Mega 5V pin",     "All 4 relay board VCC pins (10-pin header)", "Powers opto-isolation diodes from Mega's quiet rail"],
+             ["RTC Power",               "Mega 5V pin",     "RTC VCC", "Powers DS3231 (~2 mA)"],
+             ["RTC Ground",              "Mega GND",        "RTC GND", ""],
+             ["RTC I2C Bus",             "Mega Pin 20 & 21","RTC SDA & SCL", "Hardware I2C pins (Pin 20=SDA, Pin 21=SCL)"]],
             _w(38, 40, 50)),
           SP(3*mm)]
 
@@ -690,6 +670,12 @@ SEG_NAMES = [
     "e — bottom-left vertical","c — bottom-right vertical",
     "d — bottom horizontal"
 ]
+PINS_MAPPING = [
+    [ 22, 23, 24, 25, 26, 27, 28, 29 ],
+    [ 30, 31, 32, 33, 34, 35, 36, 37 ],
+    [ 38, 39, 40, 41, 42, 43, 44, 45 ],
+    [ 53, 52, 48, 50, 49, 51, 46, 47 ]
+]
 MOD_INFO = [
     ("Module 1 — HOURS TENS  +  colon on IN8", 22),
     ("Module 2 — HOURS UNITS  (IN8 unused)",   30),
@@ -704,7 +690,7 @@ for mi, (label, start) in enumerate(MOD_INFO):
         else:
             seg = "colon dots" if mi == 0 else "unused — leave empty"
             fl  = "1.8"         if mi == 0 else "—"
-        rows.append([f"IN{i+1}", f"pin {start+i}", seg, fl])
+        rows.append([f"IN{i+1}", f"pin {PINS_MAPPING[mi][i]}", seg, fl])
     story += [Paragraph(label, S_H2),
               make_table(["Board", "Mega", "Segment", "Frame label"],
                          rows, _w(18, 24, 88), mono_cols={0, 1, 3}),
@@ -769,7 +755,7 @@ story += [section_box("4.  SETUP AND UPLOAD WORKFLOW"), SP(3*mm),
           SP(3*mm),
 
           Paragraph("What if you skip Step 2?", S_H2),
-          Paragraph("If the script is not run within 5 seconds of the board booting, "
+          Paragraph("If the script is not run within 8 seconds of the board booting, "
                     "the Arduino automatically falls back to the compile-time stamp "
                     "from your computer clock, converted to UTC. "
                     "The clock will run but may be 10–20 seconds behind. "
@@ -777,10 +763,11 @@ story += [section_box("4.  SETUP AND UPLOAD WORKFLOW"), SP(3*mm),
                     "Run Step 2 any time to correct it precisely.", S_BODL),
           SP(3*mm),
 
-          Paragraph("Project files — keep all in the same folder", S_H1),
+          Paragraph("Project files", S_H1),
           make_table(
             ["File", "Purpose", "Platform"],
-            [["EEB3_Clock_Mega_Relay.ino", "Arduino sketch — open and upload with IDE", "Both"],
+            [["EEB3_Clock_Mega_Relay_PowerSaving.ino", "Arduino sketch (in its own subfolder) — open and upload with IDE", "Both"],
+             ["clock_diagnostics.html",   "Browser-based virtual clock + Web-Serial relay test UI (same subfolder as the .ino)", "Both"],
              ["SetRTC_Mac.command",        "Double-click after upload to set exact time", "Mac only"],
              ["SetRTC_Windows.bat",        "Double-click after upload to set exact time", "Windows only"],
              ["set_rtc.py",               "The actual time-setter — do not move or rename", "Both"],
@@ -795,70 +782,31 @@ story += [section_box("4.  SETUP AND UPLOAD WORKFLOW"), SP(3*mm),
           Paragraph("Coin cell replacement", S_H1),
           Paragraph("The DS3231 uses a CR2032 cell. Typical life is 5–8 years. "
                     "After replacement simply upload the sketch and run the time-setter script. "
-                    "The clock will be accurate within seconds.", S_BODL),
-          PageBreak()]
+                    "The clock will be accurate within seconds.", S_BODL)]
 
 # ─── 5. DISPLAY BEHAVIOUR ────────────────────────────────────────────────────
 story += [section_box("5.  DISPLAY BEHAVIOUR"), SP(3*mm),
 
           Paragraph("Operating hours — relay rest cycle", S_H1),
-          Paragraph("All 32 relays are completely switched OFF outside school hours. "
+          Paragraph("All 32 relays are completely switched OFF outside operating hours. "
                     "This gives the relay contacts a long daily rest, dramatically "
-                    "extending the lifespan of both the relays and the bulbs. "
-                    "The transition happens exactly once per boundary — "
-                    "no repeated clicking.", S_BODL),
+                    "extending the lifespan of both the relays and the bulbs.", S_BODL),
           make_table(
             ["Time window", "Display", "All relays"],
-            [["Before 08:00",        "Nothing — completely blank", "OFF"],
-             ["08:00 – 17:00",       "Active (see table below)",   "Normal operation"],
-             ["After 17:00",         "Nothing — completely blank", "OFF"]],
+            [["Before CLOCK_ON",      "Nothing — completely blank", "OFF"],
+             ["CLOCK_ON – CLOCK_OFF", "Active time display",        "Normal operation"],
+             ["After CLOCK_OFF",      "Nothing — completely blank", "OFF"]],
             _w(46, 80),
             mono_cols={0}),
           SP(3*mm),
 
-          Paragraph("Display logic during operating hours (08:00–17:00)", S_H1),
-          Paragraph("EEb3 and the period label appear ONLY during an active period (P1–P9). "
-                    "EEb3 shows for 4 seconds (:53–:56), period label for 3 seconds (:57–:59) — "
-                    "long enough to read comfortably. Only 3 relay transitions per minute. "
-                    "During breaks, between periods, before P1, and after P9 the clock "
-                    "shows plain time the entire minute.", S_BODL),
+          Paragraph("Display logic", S_H1),
+          Paragraph("The display continuously shows HH:MM with a solid colon dots.", S_BODL),
           make_table(
-            ["Condition", "Seconds :00–:52", "Seconds :53–:56", "Seconds :57–:59"],
-            [["During a period (P1–P9)", "HH:MM  colon ON", "EEb3  colon OFF", "P  x  colon OFF"],
-             ["Break (10:55–11:15)",     "HH:MM  colon ON", "HH:MM  colon ON", "HH:MM  colon ON"],
-             ["Between periods / gaps",  "HH:MM  colon ON", "HH:MM  colon ON", "HH:MM  colon ON"],
-             ["Before P1 (08:00–08:30)", "HH:MM  colon ON", "HH:MM  colon ON", "HH:MM  colon ON"],
-             ["After P9  (16:15–17:00)", "HH:MM  colon ON", "HH:MM  colon ON", "HH:MM  colon ON"]],
-            _w(44, 42, 36)),
-          SP(4*mm),
-
-          Paragraph("Bell schedule — local Brussels time", S_H1),
-          make_table(
-            ["Label", "Start", "End", "What the clock shows"],
-            [["Before school", "08:00", "08:30", "HH:MM only — no flash"],
-             ["Period 1",      "08:30", "09:15", "HH:MM, then EEb3 at :58, P  1 at :59"],
-             ["Gap",           "09:15", "09:20", "HH:MM only — no flash"],
-             ["Period 2",      "09:20", "10:05", "HH:MM, then EEb3 at :58, P  2 at :59"],
-             ["Gap",           "10:05", "10:10", "HH:MM only — no flash"],
-             ["Period 3",      "10:10", "10:55", "HH:MM, then EEb3 at :58, P  3 at :59"],
-             ["Break",         "10:55", "11:15", "HH:MM only — no flash"],
-             ["Period 4",      "11:15", "12:00", "HH:MM, then EEb3 at :58, P  4 at :59"],
-             ["Gap",           "12:00", "12:05", "HH:MM only — no flash"],
-             ["Period 5",      "12:05", "12:50", "HH:MM, then EEb3 at :58, P  5 at :59"],
-             ["Gap",           "12:50", "13:00", "HH:MM only — no flash"],
-             ["Period 6",      "13:00", "13:45", "HH:MM, then EEb3 at :58, P  6 at :59"],
-             ["Gap",           "13:45", "13:50", "HH:MM only — no flash"],
-             ["Period 7",      "13:50", "14:35", "HH:MM, then EEb3 at :58, P  7 at :59"],
-             ["Gap",           "14:35", "14:40", "HH:MM only — no flash"],
-             ["Period 8",      "14:40", "15:25", "HH:MM, then EEb3 at :58, P  8 at :59"],
-             ["Gap",           "15:25", "15:30", "HH:MM only — no flash"],
-             ["Period 9",      "15:30", "16:15", "HH:MM, then EEb3 at :58, P  9 at :59"],
-             ["After school",  "16:15", "17:00", "HH:MM only — no flash"],
-             ["Clock off",     "17:00", "08:00", "All relays OFF — completely dark"]],
-            _w(28, 20, 20)),
-          Paragraph("To edit times: update schedule[] in the code. "
-                    "CLOCK_ON_MINS and CLOCK_OFF_MINS control the on/off hours. "
-                    "All times are LOCAL Brussels time in minutes from midnight.", S_NOTE),
+            ["Condition", "Seconds :00–:59", "Colon State"],
+            [["Operating Hours Active", "HH:MM", "ON (Solid)"],
+             ["Night/Off Hours",        "Blank", "OFF"]],
+            _w(44, 42)),
           PageBreak()]
 
 # ─── 6. DST LOGIC ────────────────────────────────────────────────────────────
@@ -889,29 +837,67 @@ story += [section_box("6.  DAYLIGHT-SAVING TIME LOGIC (BRUSSELS)"), SP(3*mm),
 # ─── 7. SERIAL MONITOR ───────────────────────────────────────────────────────
 story += [section_box("7.  SERIAL MONITOR DIAGNOSTICS"), SP(3*mm),
           Paragraph("Open Serial Monitor at 9600 baud. Every time the display "
-                    "changes, one line is printed:", S_BODL),
-          Paragraph("UTC 2026-06-09T10:05:32  Local 12:05  showing P  5  colon=off",
+                    "changes, diagnostic lines are printed:", S_BODL),
+          Paragraph("[DISPLAY] Time -> 12:05  CEST+2<br/>[FRAME] '12:05'  colon=ON",
                     ST(fontName="Courier", fontSize=7.8, leading=11,
                        backColor=C_CODEBG, leftIndent=4*mm, spaceAfter=3*mm)),
           SP(2*mm),
           make_table(
             ["Serial Monitor message", "Meaning and action"],
-            [["RTC not found! Check SDA=20, SCL=21",
-              "RTC not responding. Check VCC, GND, SDA, SCL wiring. "
-              "Re-seat the module or try a replacement."],
-             ["RTC lost power -> compile-time fallback",
+            [["[RTC] I2C 0x68: FAIL code=X",
+              "RTC not responding. Check SDA=20, SCL=21 wiring. "
+              "Re-seat the module or check VCC/GND wires."],
+             ["[RTC] lostPower: TRUE - NEEDS SYNC",
               "CR2032 coin cell flat or missing. Replace cell and re-set UTC "
-              "using Section 4 Steps 1 to 5."],
-             ["No output at all after upload",
+              "using Section 4 Steps 1 to 2."],
+             ["No output at all after boot",
               "Check port selection and baud rate (9600). "
-              "If watchdog keeps rebooting, the RTC is absent — check I2C wiring."],
-             ["UTC year shows 2000 or random value",
-              "I2C glitch. Code auto-discards reads outside 2024-2099. "
-              "If persistent, re-seat wiring and check 5V supply stability."],
-             ["Display frozen, not updating",
-              "Watchdog reboots Mega within 8 s automatically. "
-              "If it keeps recurring, check I2C wiring and power supply voltage."]],
+              "Ensure power supply is active."],
+             ["[ERROR] Bad year=XXXX",
+              "I2C glitch or corrupted RTC data. The code automatically displays "
+              "dashes (----) on the clock frame. Sync the RTC."],
+             ["Clock keeps re-printing the [BOOT] banner over and over",
+              "Watchdog is rebooting the Mega. Almost always caused by a hung I2C "
+              "bus. Check SDA/SCL pullups and RTC connection."]],
             _w(70)),
+          SP(4*mm),
+
+          Paragraph("7a.  Wiring diagnostic protocol (D0 / D1 / R)", S_H1),
+          Paragraph(
+            "Beyond passive log-watching, the firmware accepts a small serial command set "
+            "for actively tracing bulb-to-relay wiring one channel at a time, without "
+            "waiting for the clock to reach a particular time of day.", S_BODY),
+          make_table(
+            ["Command", "Effect"],
+            [["D1", "Enter diagnostic mode: the clock display is paused and every relay is forced OFF."],
+             ["D0", "Exit diagnostic mode: normal HH:MM clock display resumes."],
+             ["R&lt;m&gt;&lt;i&gt;&lt;s&gt;",
+              "While in diagnostic mode, fires one relay directly. m = module 0-3, "
+              "i = relay index 0-7, s = 0 (off) or 1 (on). Example: R071 turns Module 0, "
+              "IN8 ON — useful for locating the colon bulb."],
+             ["T<10-digit unix UTC>",
+              "Syncs the RTC to an exact UTC timestamp, e.g. T1749736800. Works in or out "
+              "of diagnostic mode; unchanged from earlier firmware."]],
+            _w(30),
+            mono_cols={0}),
+          SP(2*mm),
+          Paragraph(
+            "These commands can be sent from the Arduino Serial Monitor (9600 baud, "
+            "no line ending needed beyond CR/LF) but are normally driven automatically "
+            "by the companion browser tool below.", S_NOTE),
+          SP(3*mm),
+
+          Paragraph("7b.  clock_diagnostics.html — browser wiring-test tool", S_H1),
+          Paragraph(
+            "The EEB3_Clock_Mega_Relay_PowerSaving folder includes clock_diagnostics.html, "
+            "a self-contained browser page that combines a virtual on-screen clock with a "
+            "live relay test panel driven over Web Serial. Open it in Chrome or Edge "
+            "(Web Serial is not available in Safari or Firefox), click Connect, and select "
+            "the Arduino's serial port. The page automatically sends D1 to pause the clock, "
+            "then exposes a Test button for every relay on every module; each click sends the "
+            "matching R&lt;m&gt;&lt;i&gt;&lt;s&gt; command so you can confirm exactly which bulb lights up for "
+            "a given IN pin. Closing the page or clicking Disconnect sends D0 to resume the "
+            "normal clock display.", S_BODY),
           PageBreak()]
 
 # ─── 8. COMMON ISSUES ────────────────────────────────────────────────────────
@@ -922,50 +908,40 @@ story += [section_box("8.  COMMON ISSUES AND CHECKS"), SP(3*mm),
               "Short circuit in wiring",
               "Unplug relay board power wires first. Test bare Mega plus USB. "
               "Add wire groups back one at a time until short reappears."],
-             ["Board not appearing in Mac port list",
-              "CH340 USB driver missing",
-              "Download CH340 driver. Install the pkg file. Approve in "
-              "System Settings then Privacy and Security. Reboot Mac."],
-             ["Board not in Windows port list",
-              "Driver missing or wrong port",
-              "Open Device Manager. Look for yellow ! on a COM entry. "
-              "Install CH340 driver or update device driver."],
+             ["Board not appearing in Mac/Windows port list",
+              "CH340 USB driver missing or bad cable",
+              "Download CH340 driver. Open Device Manager or System Information to verify. "
+              "Use a high-quality USB-B data cable."],
              ["A segment never lights or is always on",
               "Wire swapped or relay polarity wrong",
-              "Verify pin number against Section 3c. "
-              "Toggle RELAY_ACTIVE_LOW in code if all segments are inverted."],
-             ["Wrong digit shows wrong number",
-              "SEG2RELAY or PINS mismatch",
-              "Check Serial Monitor for the frame being sent. "
-              "Test each relay to confirm segment mapping."],
+              "Verify pin number against Section 3c. Use D1 + R&lt;m&gt;&lt;i&gt;&lt;s&gt; (Section 7a) "
+              "or clock_diagnostics.html to fire that exact relay and confirm the physical "
+              "wiring. Toggle RELAY_ACTIVE_LOW in code only if EVERY segment is inverted."],
              ["Time wrong by exactly 1 or 2 hours",
               "RTC set to local time instead of UTC",
               "Re-set RTC using the correct UTC value. See Section 4."],
-             ["Time drifts slowly over weeks",
-              "DS3231 normal tolerance (+/-2 ppm)",
-              "Under 1 minute per year is normal. "
-              "Re-enter UTC if drift becomes noticeable."],
-             ["Colon bulb flickers",
-              "Loose relay terminal or failing relay",
-              "Inspect Module 1 IN8 terminal and Mega pin 29 connection."],
              ["All bulbs off but Mega running",
-              "External 5V supply not powered on",
-              "Check relay supply. Measure voltage on relay VCC pin."],
+              "External 5V supply off or relay jumpers still on",
+              "Verify 5V 3A adapter is powered. Check that VCC/JD-VCC jumpers are "
+              "REMOVED on all modules so coils get power from JD-VCC."],
              ["Mega reboots every 8 seconds",
               "Watchdog triggered by stalled loop",
-              "Almost always the RTC is not responding. Check I2C wiring."]],
+              "Check RTC connections. High I2C noise can lock the bus."]],
             _w(48, 50)),
           PageBreak()]
 
 # ─── 9. RELIABILITY NOTES ────────────────────────────────────────────────────
 story += [section_box("9.  RELIABILITY AND LONG-LIFE DESIGN NOTES"), SP(3*mm)]
 notes = [
+    ("Opto-Isolation Power Routing",
+     "Removing the JD-VCC jumpers separates the relay coils' high-current circuit from the "
+     "Arduino Mega's quiet digital supply. Inductive spikes and voltage sags from switching "
+     "coils are confined to the external supply lines, preventing resets."),
     ("Daily relay rest — operating hours 08:00–17:00",
      "All 32 relays are completely de-energised outside school hours. "
      "allRelaysOff() uses writeRelay() internally, so once the board is dark "
      "there are zero repeated clicks — only one transition at 08:00 and one at 17:00. "
-     "That is ~15 hours of rest every day, dramatically extending relay and bulb lifespan. "
-     "CLOCK_ON_MINS and CLOCK_OFF_MINS control the window."),
+     "That is ~15 hours of rest every day, dramatically extending relay and bulb lifespan."),
     ("Relay switching minimised",
      "writeRelay() checks current state before driving the pin. A relay only "
      "clicks when its segment genuinely changes. Showing the same digit twice "
@@ -973,10 +949,6 @@ notes = [
     ("Colon stays on — never blinks",
      "Blinking at 1 Hz would produce ~31 million operations per year on the "
      "colon relay alone. The colon stays steadily on during time display."),
-    ("EEb3 and period label: active periods only",
-     "The :58 EEb3 flash and :59 period label are shown ONLY when a lesson is "
-     "in progress. During the break, between periods, before P1, and after P9 "
-     "the clock shows plain HH:MM the whole minute — no unnecessary relay toggles."),
     ("Hardware watchdog",
      "wdt_enable(WDTO_8S) makes the microcontroller reboot itself if the "
      "main loop stops for more than 8 seconds, recovering from I2C hangs "
@@ -987,14 +959,7 @@ notes = [
      "and no buttons."),
     ("Defensive RTC reads",
      "Any timestamp with a year outside 2024–2099 is silently discarded. "
-     "This prevents corrupted I2C data from causing display errors."),
-    ("Safe boot sequence",
-     "All relay pins are driven to the OFF level before being configured as "
-     "outputs, eliminating the brief boot glitch that would otherwise flash "
-     "all bulbs on every power cycle."),
-    ("Coin cell maintenance",
-     "Replace the DS3231 CR2032 proactively every 5–7 years. "
-     "After replacement, re-enter the UTC time once using Section 4."),
+     "This prevents corrupted I2C data from causing display errors.")
 ]
 for title, body in notes:
     story.append(KeepTogether([Paragraph(title, S_H2), Paragraph(body, S_BODL)]))
@@ -1002,7 +967,7 @@ story.append(PageBreak())
 
 # ─── 10. CODE LISTING ────────────────────────────────────────────────────────
 story += [section_box("10.  FULL CODE LISTING"), SP(2*mm),
-          Paragraph("File: EEB3_Clock_Mega_Relay.ino  —  "
+          Paragraph("File: EEB3_Clock_Mega_Relay_PowerSaving.ino  —  FW_VERSION \"4.3-DIAG-2026-09-22\"  —  "
                     "Board: Arduino Mega or Mega 2560, Processor: ATmega2560", S_NOTE),
           SP(1*mm)]
 for line in CODE_TEXT.split("\n"):
@@ -1019,7 +984,7 @@ story += [section_box("11.  QUICK REFERENCE"), SP(3*mm),
              ["Module 1  IN1–IN8  (hours tens + colon)",  "22 23 24 25 26 27 28 29"],
              ["Module 2  IN1–IN8  (hours units)",         "30 31 32 33 34 35 36 37"],
              ["Module 3  IN1–IN8  (minutes tens)",        "38 39 40 41 42 43 44 45"],
-             ["Module 4  IN1–IN8  (minutes units)",       "46 47 48 49 50 51 52 53"]],
+             ["Module 4  IN1–IN8  (minutes units)",       "53 52 48 50 49 51 46 47"]],
             _w(90),
             mono_cols={1}),
           SP(5*mm),
@@ -1027,20 +992,14 @@ story += [section_box("11.  QUICK REFERENCE"), SP(3*mm),
           Paragraph("Configurable constants in code", S_H1),
           make_table(
             ["Constant", "Default", "Change when"],
-            [["RELAY_ACTIVE_LOW",        "true",
-              "Relay boards fire on HIGH instead of LOW (reverse polarity boards)"],
-             ["BLANK_LEADING_HOUR_ZERO", "true",
-              "You prefer 09:05 displayed instead of  9:05"],
-             ["EEB3_START",              "53",
-              "First second EEb3 appears (:53–:56, 4 seconds total)"],
-             ["PERIOD_START",            "57",
-              "First second period label appears (:57–:59, 3 seconds total)"],
-             ["CLOCK_ON_MINS",           "8*60 = 480",
-              "Time when relays wake up (08:00 by default)"],
-             ["CLOCK_OFF_MINS",          "17*60 = 1020",
-              "Time when all relays go to sleep (17:00 by default)"],
-             ["SERIAL_WAIT_MS",          "5000",
-              "Milliseconds to wait for the Python time-setter script at boot"]],
+            [["RELAY_ACTIVE_LOW",        "false",
+               "Confirmed hardware is active-HIGH; set true only if fitted with active-LOW relay boards"],
+             ["CLOCK_ON_MINS",           "480 (08:00)",
+               "Time when relays wake up (minutes from midnight, e.g. 8*60 = 480 for 08:00)"],
+             ["CLOCK_OFF_MINS",          "1020 (17:00)",
+               "Time when all relays go to sleep (minutes from midnight, e.g. 17*60 = 1020 for 17:00)"],
+             ["SERIAL_WAIT_MS",          "8000",
+               "Milliseconds to wait for the Python time-setter script at boot"]],
             _w(52, 38),
             mono_cols={0, 1}),
 
