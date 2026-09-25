@@ -44,7 +44,7 @@
 #define FW_VERSION          "4.3-DIAG-2026-09-22"
 #define SERIAL_BAUD         9600
 #define SERIAL_WAIT_MS      8000UL
-#define RELAY_ACTIVE_LOW    true
+#define RELAY_ACTIVE_LOW    false
 
 // Power Saving active schedule: 08:00 AM to 05:00 PM
 const int CLOCK_ON_MINS  = 8 * 60;   // 08:00 AM (480 minutes)
